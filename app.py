@@ -71,7 +71,16 @@ if st.button("🚀 Analyze Stock"):
         st.stop()
 
     close_prices = data["Close"]
+
+    # Ensure Series
+    if isinstance(close_prices, pd.DataFrame):
+        close_prices = close_prices.squeeze()
+
     daily_returns = close_prices.pct_change().dropna()
+
+    if len(daily_returns) < 2:
+        st.warning("Not enough data to calculate risk metrics.")
+        st.stop()
 
     # ---------------------------------------------------
     # PRICE CHART
@@ -94,25 +103,24 @@ if st.button("🚀 Analyze Stock"):
     # ---------------------------------------------------
     st.subheader("📊 Risk Metrics")
 
-    if len(daily_returns) < 2:
-        st.warning("Not enough data to calculate risk metrics.")
-        st.stop()
+    std_dev = float(daily_returns.std())
+    mean_return = float(daily_returns.mean())
 
-    volatility = daily_returns.std() * np.sqrt(252)
-    VaR = np.percentile(daily_returns, 5)
+    volatility = std_dev * np.sqrt(252)
+    VaR = float(np.percentile(daily_returns, 5))
 
-    if daily_returns.std() != 0 and not np.isnan(daily_returns.std()):
-        sharpe = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252)
+    if std_dev > 0 and not np.isnan(std_dev):
+        sharpe = (mean_return / std_dev) * np.sqrt(252)
     else:
-        sharpe = 0
+        sharpe = 0.0
 
-    # Replace NaN with 0
+    # Replace invalid values safely
     if np.isnan(volatility):
-        volatility = 0
+        volatility = 0.0
     if np.isnan(VaR):
-        VaR = 0
+        VaR = 0.0
     if np.isnan(sharpe):
-        sharpe = 0
+        sharpe = 0.0
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Annual Volatility", f"{volatility:.2f}")
@@ -124,9 +132,9 @@ if st.button("🚀 Analyze Stock"):
     # ---------------------------------------------------
     st.subheader("🎲 Monte Carlo Simulation (1 Year Projection)")
 
-    S0 = close_prices.iloc[-1]
-    mu = daily_returns.mean() * 252
-    sigma = daily_returns.std() * np.sqrt(252)
+    S0 = float(close_prices.iloc[-1])
+    mu = mean_return * 252
+    sigma = std_dev * np.sqrt(252)
 
     simulations = monte_carlo_simulation(S0, mu, sigma)
 
@@ -174,7 +182,7 @@ if st.button("🚀 Analyze Stock"):
         prediction_scaled = model.predict(X_test)
         prediction = scaler.inverse_transform(prediction_scaled)
 
-        st.metric("Next Day Predicted Price", f"₹{prediction[0][0]:.2f}")
+        st.metric("Next Day Predicted Price", f"₹{float(prediction[0][0]):.2f}")
 
     except:
         st.warning("LSTM model unavailable in cloud environment.")
