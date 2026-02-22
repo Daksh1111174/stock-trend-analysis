@@ -1,7 +1,6 @@
-pyspark
-yfinance
 streamlit
-matplotlib
+yfinance
 pandas
 numpy
+matplotlib
 plotly
