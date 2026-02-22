@@ -3,27 +3,24 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
-from portfolio import get_portfolio_data, optimize_portfolio
 from risk_models import monte_carlo_simulation
 from lstm_model import train_lstm
 from fundamentals import get_fundamentals
 from pdf_report import generate_pdf
-from nifty_fetcher import get_nifty_100_from_wikipedia
-from sector_analysis import get_sector_data
-from fii_dii import get_fii_dii_data
 from options_analysis import get_option_chain
 
 # ---------------------------------------------------
 # PAGE CONFIG
 # ---------------------------------------------------
-st.set_page_config(page_title="🇮🇳 Indian Market Quant Pro", layout="wide")
+st.set_page_config(page_title="🇮🇳 Indian Stock Analyzer", layout="wide")
 
 # ---------------------------------------------------
-# UI Styling
+# UI STYLE
 # ---------------------------------------------------
 st.markdown("""
 <style>
@@ -40,16 +37,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🇮🇳 Indian Market Quant Pro")
-st.caption("Portfolio Optimization • Risk Modeling • AI Forecasting")
+st.title("🇮🇳 Indian Stock Risk & AI Analyzer")
+st.caption("Monte Carlo • Risk Metrics • AI Forecast • Fundamentals")
 
 # ---------------------------------------------------
-# STOCK SELECTION
+# STOCK SELECTION (Single Only)
 # ---------------------------------------------------
-st.subheader("📌 Stock Selection")
-
-mode = st.radio("Choose Mode", ["Indian Stocks", "Custom Input", "Auto NIFTY 100"])
-
 INDIAN_STOCKS = {
     "Reliance Industries": "RELIANCE.NS",
     "Vedanta": "VEDL.NS",
@@ -59,106 +52,62 @@ INDIAN_STOCKS = {
     "NIFTY 50 Index": "^NSEI"
 }
 
-tickers = []
+selected_stock_name = st.selectbox(
+    "Select Stock",
+    list(INDIAN_STOCKS.keys())
+)
 
-if mode == "Indian Stocks":
-    selected = st.multiselect(
-        "Select Companies",
-        list(INDIAN_STOCKS.keys()),
-        default=["Reliance Industries", "Tata Motors"]
-    )
-    tickers = [INDIAN_STOCKS[s] for s in selected]
-
-elif mode == "Auto NIFTY 100":
-    tickers = get_nifty_100_from_wikipedia()
-    st.success(f"Loaded {len(tickers)} NIFTY stocks")
-
-else:
-    custom_input = st.text_input(
-        "Enter NSE Tickers (.NS required)",
-        "RELIANCE.NS,TATAMOTORS.NS"
-    )
-    tickers = [t.strip() for t in custom_input.split(",")]
-
+ticker = INDIAN_STOCKS[selected_stock_name]
 start_date = st.date_input("Start Date", datetime(2018,1,1))
 
 # ---------------------------------------------------
 # RUN ANALYSIS
 # ---------------------------------------------------
-if st.button("🚀 Run Full Quant Analysis"):
+if st.button("🚀 Analyze Stock"):
 
-    if not tickers:
-        st.warning("Please select at least one stock.")
+    data = yf.download(ticker, start=start_date, progress=False)
+
+    if data.empty:
+        st.error("No data found.")
         st.stop()
 
-    data, returns = get_portfolio_data(tickers, start_date)
-
-    if data is None or data.empty:
-        st.error("Invalid tickers or insufficient data.")
-        st.stop()
-
-    # ---------------------------------------------------
-    # PORTFOLIO OPTIMIZATION
-    # ---------------------------------------------------
-    st.subheader("📊 Portfolio Optimization")
-
-    optimal_weights, results = optimize_portfolio(returns)
-
-    # 🔥 IMPORTANT FIX: use data.columns not tickers
-    weights_df = pd.DataFrame({
-        "Stock": data.columns,
-        "Optimal Weight": optimal_weights
-    })
-
-    st.dataframe(weights_df)
-
-    # ---- Efficient Frontier with NaN filtering ----
-    valid = (~np.isnan(results[0])) & (~np.isnan(results[1]))
-
-    ef_fig = go.Figure()
-
-    ef_fig.add_trace(go.Scatter(
-        x=results[1][valid],
-        y=results[0][valid],
-        mode='markers',
-        marker=dict(
-            size=5,
-            color=results[2][valid],
-            colorscale='Viridis',
-            showscale=True
-        )
-    ))
-
-    ef_fig.update_layout(
-        template="plotly_dark",
-        xaxis_title="Volatility",
-        yaxis_title="Expected Return"
-    )
-
-    st.plotly_chart(ef_fig, use_container_width=True)
-
-    # ---------------------------------------------------
-    # SINGLE STOCK ANALYSIS
-    # ---------------------------------------------------
-    stock = data.columns[0]
-    close_prices = data[stock]
+    close_prices = data["Close"]
     daily_returns = close_prices.pct_change().dropna()
 
+    # ---------------------------------------------------
+    # PRICE CHART
+    # ---------------------------------------------------
+    st.subheader("📈 Price Chart")
+
+    fig_price = go.Figure()
+    fig_price.add_trace(go.Scatter(
+        x=data.index,
+        y=close_prices,
+        mode='lines',
+        name="Close Price"
+    ))
+
+    fig_price.update_layout(template="plotly_dark")
+    st.plotly_chart(fig_price, use_container_width=True)
+
+    # ---------------------------------------------------
+    # RISK METRICS
+    # ---------------------------------------------------
+    st.subheader("📊 Risk Metrics")
+
+    volatility = daily_returns.std() * np.sqrt(252)
     VaR = np.percentile(daily_returns, 5)
+    sharpe = (daily_returns.mean()/daily_returns.std()) * np.sqrt(252)
 
-    sharpe_ratio = (
-        (daily_returns.mean() / daily_returns.std()) * np.sqrt(252)
-        if daily_returns.std() != 0 else 0
-    )
-
-    col1, col2 = st.columns(2)
-    col1.metric("Value at Risk (95%)", f"{VaR:.4f}")
-    col2.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Annual Volatility", f"{volatility:.2f}")
+    col2.metric("Value at Risk (95%)", f"{VaR:.4f}")
+    col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
 
     # ---------------------------------------------------
-    # MONTE CARLO SIMULATION
+    # MONTE CARLO (CLEAN)
     # ---------------------------------------------------
-    st.subheader("🎲 Monte Carlo Simulation")
+    st.subheader("🎲 Monte Carlo Simulation (1 Year)")
 
     S0 = close_prices.iloc[-1]
     mu = daily_returns.mean() * 252
@@ -166,23 +115,39 @@ if st.button("🚀 Run Full Quant Analysis"):
 
     simulations = monte_carlo_simulation(S0, mu, sigma)
 
-    mc_fig = go.Figure()
+    mean_path = np.mean(simulations, axis=1)
+    upper_band = np.percentile(simulations, 95, axis=1)
+    lower_band = np.percentile(simulations, 5, axis=1)
 
-    for i in range(min(50, simulations.shape[1])):
-        mc_fig.add_trace(go.Scatter(
-            y=simulations[:, i],
-            mode='lines',
-            line=dict(width=1),
-            showlegend=False
-        ))
+    fig_mc = go.Figure()
 
-    mc_fig.update_layout(template="plotly_dark")
-    st.plotly_chart(mc_fig, use_container_width=True)
+    fig_mc.add_trace(go.Scatter(
+        y=mean_path,
+        mode='lines',
+        name='Expected Path'
+    ))
+
+    fig_mc.add_trace(go.Scatter(
+        y=upper_band,
+        mode='lines',
+        name='95% Upper Bound',
+        line=dict(dash='dash')
+    ))
+
+    fig_mc.add_trace(go.Scatter(
+        y=lower_band,
+        mode='lines',
+        name='5% Lower Bound',
+        line=dict(dash='dash')
+    ))
+
+    fig_mc.update_layout(template="plotly_dark")
+    st.plotly_chart(fig_mc, use_container_width=True)
 
     # ---------------------------------------------------
     # LSTM FORECAST
     # ---------------------------------------------------
-    st.subheader("🤖 AI Forecast (LSTM)")
+    st.subheader("🤖 AI Forecast")
 
     try:
         model, scaler = train_lstm(close_prices.values)
@@ -197,114 +162,61 @@ if st.button("🚀 Run Full Quant Analysis"):
         st.metric("Next Day Predicted Price", f"₹{prediction[0][0]:.2f}")
 
     except:
-        st.warning("LSTM could not run in cloud environment.")
-
-    # ---------------------------------------------------
-    # SECTOR HEATMAP
-    # ---------------------------------------------------
-    st.subheader("🏭 Sector-wise Market Cap Heatmap")
-
-    try:
-        sector_df = get_sector_data(data.columns)
-        if not sector_df.empty:
-            fig = px.treemap(
-                sector_df,
-                path=["Sector","Ticker"],
-                values="MarketCap",
-                color="MarketCap",
-                template="plotly_dark"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    except:
-        st.warning("Sector data unavailable.")
-
-    # ---------------------------------------------------
-    # FII / DII
-    # ---------------------------------------------------
-    st.subheader("💰 FII / DII Activity")
-
-    try:
-        fii_df = get_fii_dii_data()
-        if not fii_df.empty:
-            st.dataframe(fii_df.head())
-        else:
-            st.warning("FII/DII data unavailable.")
-    except:
-        st.warning("FII/DII API blocked.")
+        st.warning("LSTM unavailable on cloud.")
 
     # ---------------------------------------------------
     # OPTION CHAIN
     # ---------------------------------------------------
-    st.subheader("📈 NIFTY Option Chain")
+    st.subheader("📈 Option Chain")
 
     try:
-        result = get_option_chain("^NSEI")
+        result = get_option_chain(ticker)
 
         if result is not None:
             calls, puts, expiry = result
         else:
             calls, puts, expiry = None, None, None
 
-        if calls is not None and puts is not None:
-
+        if calls is not None:
             st.write(f"Nearest Expiry: {expiry}")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.write("Top Call OI")
-                st.dataframe(
-                    calls.sort_values("openInterest",
-                                      ascending=False).head()
-                )
-
-            with col2:
-                st.write("Top Put OI")
-                st.dataframe(
-                    puts.sort_values("openInterest",
-                                     ascending=False).head()
-                )
+            st.dataframe(calls.head())
         else:
-            st.warning("Option Chain unavailable.")
+            st.warning("Option data unavailable.")
 
     except:
-        st.warning("Option Chain API blocked.")
+        st.warning("Option API blocked.")
 
     # ---------------------------------------------------
     # FUNDAMENTALS
     # ---------------------------------------------------
     st.subheader("🏢 Company Fundamentals")
 
-    try:
-        fundamentals = get_fundamentals(stock)
-        st.dataframe(pd.DataFrame(
-            fundamentals.items(),
-            columns=["Metric","Value"]
-        ))
-    except:
-        st.warning("Fundamental data unavailable.")
+    fundamentals = get_fundamentals(ticker)
+
+    st.dataframe(pd.DataFrame(
+        fundamentals.items(),
+        columns=["Metric","Value"]
+    ))
 
     # ---------------------------------------------------
     # PDF REPORT
     # ---------------------------------------------------
     st.subheader("📄 Executive Report")
 
-    try:
-        metrics_dict = {
-            "Stock": stock,
-            "VaR": VaR,
-            "Sharpe Ratio": sharpe_ratio
-        }
+    metrics_dict = {
+        "Stock": ticker,
+        "Volatility": volatility,
+        "VaR": VaR,
+        "Sharpe": sharpe
+    }
 
-        generate_pdf("report.pdf", metrics_dict)
+    generate_pdf("report.pdf", metrics_dict)
 
-        with open("report.pdf", "rb") as f:
-            st.download_button(
-                "Download PDF",
-                f,
-                file_name="Indian_Market_Report.pdf"
-            )
-    except:
-        st.warning("PDF generation failed.")
+    with open("report.pdf", "rb") as f:
+        st.download_button(
+            "Download Report",
+            f,
+            file_name="Stock_Report.pdf"
+        )
 
-    st.success("Quant Analysis Completed 🚀")
+    st.success("Analysis Completed 🚀")
