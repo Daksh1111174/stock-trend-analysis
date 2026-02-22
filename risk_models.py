@@ -1,39 +1,18 @@
-# ---- Cleaner Monte Carlo Visualization ----
+# risk_models.py
 
-st.subheader("🎲 Monte Carlo Simulation (Clean View)")
+import numpy as np
 
-final_prices = simulations
+def monte_carlo_simulation(S0, mu, sigma, days=252, simulations=1000):
 
-mean_path = np.mean(final_prices, axis=1)
-upper_band = np.percentile(final_prices, 95, axis=1)
-lower_band = np.percentile(final_prices, 5, axis=1)
+    dt = 1/252
+    price_paths = np.zeros((days, simulations))
+    price_paths[0] = S0
 
-mc_fig = go.Figure()
+    for t in range(1, days):
+        Z = np.random.standard_normal(simulations)
+        price_paths[t] = price_paths[t-1] * np.exp(
+            (mu - 0.5 * sigma**2) * dt +
+            sigma * np.sqrt(dt) * Z
+        )
 
-# Mean path
-mc_fig.add_trace(go.Scatter(
-    y=mean_path,
-    mode='lines',
-    name='Expected Path',
-    line=dict(width=3)
-))
-
-# Upper band
-mc_fig.add_trace(go.Scatter(
-    y=upper_band,
-    mode='lines',
-    name='95% Upper Bound',
-    line=dict(dash='dash')
-))
-
-# Lower band
-mc_fig.add_trace(go.Scatter(
-    y=lower_band,
-    mode='lines',
-    name='5% Lower Bound',
-    line=dict(dash='dash')
-))
-
-mc_fig.update_layout(template="plotly_dark")
-
-st.plotly_chart(mc_fig, use_container_width=True)
+    return price_paths
