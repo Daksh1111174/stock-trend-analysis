@@ -3,7 +3,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
@@ -42,7 +41,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🇮🇳 Indian Market Quant Pro")
-st.caption("NIFTY Analytics • Portfolio Optimization • Risk Modeling • AI Forecasting")
+st.caption("Portfolio Optimization • Risk Modeling • AI Forecasting")
 
 # ---------------------------------------------------
 # STOCK SELECTION
@@ -60,6 +59,8 @@ INDIAN_STOCKS = {
     "NIFTY 50 Index": "^NSEI"
 }
 
+tickers = []
+
 if mode == "Indian Stocks":
     selected = st.multiselect(
         "Select Companies",
@@ -69,8 +70,12 @@ if mode == "Indian Stocks":
     tickers = [INDIAN_STOCKS[s] for s in selected]
 
 elif mode == "Auto NIFTY 100":
-    tickers = get_nifty_100_from_wikipedia()
-    st.success(f"Loaded {len(tickers)} NIFTY 100 stocks")
+    try:
+        tickers = get_nifty_100_from_wikipedia()
+        st.success(f"Loaded {len(tickers)} NIFTY 100 stocks")
+    except:
+        st.error("Failed to fetch NIFTY 100 list.")
+        st.stop()
 
 else:
     custom_input = st.text_input(
@@ -87,19 +92,19 @@ start_date = st.date_input("Start Date", datetime(2018,1,1))
 if st.button("🚀 Run Full Quant Analysis"):
 
     if not tickers:
-        st.warning("Please select stocks.")
+        st.warning("Please select at least one stock.")
         st.stop()
 
     data, returns = get_portfolio_data(tickers, start_date)
 
-    if data.empty:
-        st.error("Invalid tickers or no data.")
+    if data is None or data.empty:
+        st.error("Invalid tickers or no data found.")
         st.stop()
 
     # ---------------------------------------------------
     # PORTFOLIO OPTIMIZATION
     # ---------------------------------------------------
-    st.subheader("📊 Portfolio Optimization (Efficient Frontier)")
+    st.subheader("📊 Portfolio Optimization")
 
     optimal_weights, results = optimize_portfolio(returns)
 
@@ -115,12 +120,8 @@ if st.button("🚀 Run Full Quant Analysis"):
         x=results[1],
         y=results[0],
         mode='markers',
-        marker=dict(
-            size=5,
-            color=results[2],
-            colorscale='Viridis',
-            showscale=True
-        )
+        marker=dict(size=5, color=results[2],
+                    colorscale='Viridis', showscale=True)
     ))
 
     ef_fig.update_layout(
@@ -132,7 +133,7 @@ if st.button("🚀 Run Full Quant Analysis"):
     st.plotly_chart(ef_fig, use_container_width=True)
 
     # ---------------------------------------------------
-    # RISK METRICS (FIRST STOCK)
+    # RISK METRICS
     # ---------------------------------------------------
     stock = tickers[0]
     close_prices = data[stock]
@@ -146,7 +147,7 @@ if st.button("🚀 Run Full Quant Analysis"):
     col2.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
 
     # ---------------------------------------------------
-    # MONTE CARLO SIMULATION
+    # MONTE CARLO
     # ---------------------------------------------------
     st.subheader("🎲 Monte Carlo Simulation")
 
@@ -157,7 +158,7 @@ if st.button("🚀 Run Full Quant Analysis"):
     simulations = monte_carlo_simulation(S0, mu, sigma)
 
     mc_fig = go.Figure()
-    for i in range(50):
+    for i in range(min(50, simulations.shape[1])):
         mc_fig.add_trace(go.Scatter(
             y=simulations[:,i],
             mode='lines',
@@ -173,96 +174,127 @@ if st.button("🚀 Run Full Quant Analysis"):
     # ---------------------------------------------------
     st.subheader("🤖 AI Forecast (LSTM)")
 
-    model, scaler = train_lstm(close_prices.values)
+    try:
+        model, scaler = train_lstm(close_prices.values)
 
-    last_60 = close_prices.values[-60:]
-    last_60_scaled = scaler.transform(last_60.reshape(-1,1))
-    X_test = np.array([last_60_scaled])
+        last_60 = close_prices.values[-60:]
+        last_60_scaled = scaler.transform(last_60.reshape(-1,1))
+        X_test = np.array([last_60_scaled])
 
-    prediction_scaled = model.predict(X_test)
-    prediction = scaler.inverse_transform(prediction_scaled)
+        prediction_scaled = model.predict(X_test)
+        prediction = scaler.inverse_transform(prediction_scaled)
 
-    st.metric("Next Day Predicted Price", f"₹{prediction[0][0]:.2f}")
+        st.metric("Next Day Predicted Price", f"₹{prediction[0][0]:.2f}")
+
+    except:
+        st.warning("LSTM model could not run on cloud environment.")
 
     # ---------------------------------------------------
     # SECTOR HEATMAP
     # ---------------------------------------------------
     st.subheader("🏭 Sector-wise Market Cap Heatmap")
 
-    sector_df = get_sector_data(tickers)
-
-    if not sector_df.empty:
-        fig = px.treemap(
-            sector_df,
-            path=["Sector","Ticker"],
-            values="MarketCap",
-            color="MarketCap",
-            template="plotly_dark"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    try:
+        sector_df = get_sector_data(tickers)
+        if not sector_df.empty:
+            fig = px.treemap(
+                sector_df,
+                path=["Sector","Ticker"],
+                values="MarketCap",
+                color="MarketCap",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    except:
+        st.warning("Sector data unavailable.")
 
     # ---------------------------------------------------
-    # FII / DII DATA
+    # FII / DII
     # ---------------------------------------------------
     st.subheader("💰 FII / DII Activity")
 
-    fii_df = get_fii_dii_data()
-
-    if not fii_df.empty:
-        st.dataframe(fii_df.head())
-    else:
-        st.warning("FII/DII data unavailable.")
+    try:
+        fii_df = get_fii_dii_data()
+        if not fii_df.empty:
+            st.dataframe(fii_df.head())
+        else:
+            st.warning("FII/DII data unavailable.")
+    except:
+        st.warning("FII/DII API blocked on cloud.")
 
     # ---------------------------------------------------
-    # OPTION CHAIN
+    # OPTION CHAIN (SAFE FIX)
     # ---------------------------------------------------
     st.subheader("📈 NIFTY Option Chain")
 
-    calls, puts, expiry = get_option_chain("^NSEI")
+    try:
+        result = get_option_chain("^NSEI")
 
-    if calls is not None:
-        st.write(f"Nearest Expiry: {expiry}")
+        if result is not None:
+            calls, puts, expiry = result
+        else:
+            calls, puts, expiry = None, None, None
 
-        col1, col2 = st.columns(2)
+        if calls is not None and puts is not None:
 
-        with col1:
-            st.write("Top Call OI")
-            st.dataframe(calls.sort_values("openInterest", ascending=False).head())
+            st.write(f"Nearest Expiry: {expiry}")
 
-        with col2:
-            st.write("Top Put OI")
-            st.dataframe(puts.sort_values("openInterest", ascending=False).head())
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write("Top Call OI")
+                st.dataframe(
+                    calls.sort_values("openInterest",
+                                      ascending=False).head()
+                )
+
+            with col2:
+                st.write("Top Put OI")
+                st.dataframe(
+                    puts.sort_values("openInterest",
+                                     ascending=False).head()
+                )
+        else:
+            st.warning("Option Chain unavailable.")
+
+    except:
+        st.warning("Option Chain API blocked.")
 
     # ---------------------------------------------------
     # FUNDAMENTALS
     # ---------------------------------------------------
     st.subheader("🏢 Company Fundamentals")
 
-    fundamentals = get_fundamentals(stock)
-    st.dataframe(pd.DataFrame(
-        fundamentals.items(),
-        columns=["Metric","Value"]
-    ))
+    try:
+        fundamentals = get_fundamentals(stock)
+        st.dataframe(pd.DataFrame(
+            fundamentals.items(),
+            columns=["Metric","Value"]
+        ))
+    except:
+        st.warning("Fundamental data unavailable.")
 
     # ---------------------------------------------------
     # PDF REPORT
     # ---------------------------------------------------
-    st.subheader("📄 Download Executive Report")
+    st.subheader("📄 Executive Report")
 
-    metrics_dict = {
-        "Stock": stock,
-        "VaR": VaR,
-        "Sharpe Ratio": sharpe_ratio,
-        "Predicted Price": prediction[0][0]
-    }
+    try:
+        metrics_dict = {
+            "Stock": stock,
+            "VaR": VaR,
+            "Sharpe Ratio": sharpe_ratio
+        }
 
-    generate_pdf("report.pdf", metrics_dict)
+        generate_pdf("report.pdf", metrics_dict)
 
-    with open("report.pdf", "rb") as f:
-        st.download_button(
-            "Download PDF",
-            f,
-            file_name="Indian_Market_Report.pdf"
-        )
+        with open("report.pdf", "rb") as f:
+            st.download_button(
+                "Download PDF",
+                f,
+                file_name="Indian_Market_Report.pdf"
+            )
+    except:
+        st.warning("PDF generation failed.")
 
     st.success("Quant Analysis Completed 🚀")
