@@ -23,7 +23,7 @@ from options_analysis import get_option_chain
 st.set_page_config(page_title="🇮🇳 Indian Market Quant Pro", layout="wide")
 
 # ---------------------------------------------------
-# PREMIUM GLASS UI
+# UI Styling
 # ---------------------------------------------------
 st.markdown("""
 <style>
@@ -70,12 +70,8 @@ if mode == "Indian Stocks":
     tickers = [INDIAN_STOCKS[s] for s in selected]
 
 elif mode == "Auto NIFTY 100":
-    try:
-        tickers = get_nifty_100_from_wikipedia()
-        st.success(f"Loaded {len(tickers)} NIFTY 100 stocks")
-    except:
-        st.error("Failed to fetch NIFTY 100 list.")
-        st.stop()
+    tickers = get_nifty_100_from_wikipedia()
+    st.success(f"Loaded {len(tickers)} NIFTY stocks")
 
 else:
     custom_input = st.text_input(
@@ -98,7 +94,7 @@ if st.button("🚀 Run Full Quant Analysis"):
     data, returns = get_portfolio_data(tickers, start_date)
 
     if data is None or data.empty:
-        st.error("Invalid tickers or no data found.")
+        st.error("Invalid tickers or insufficient data.")
         st.stop()
 
     # ---------------------------------------------------
@@ -108,20 +104,29 @@ if st.button("🚀 Run Full Quant Analysis"):
 
     optimal_weights, results = optimize_portfolio(returns)
 
+    # 🔥 IMPORTANT FIX: use data.columns not tickers
     weights_df = pd.DataFrame({
-        "Stock": tickers,
+        "Stock": data.columns,
         "Optimal Weight": optimal_weights
     })
 
     st.dataframe(weights_df)
 
+    # ---- Efficient Frontier with NaN filtering ----
+    valid = (~np.isnan(results[0])) & (~np.isnan(results[1]))
+
     ef_fig = go.Figure()
+
     ef_fig.add_trace(go.Scatter(
-        x=results[1],
-        y=results[0],
+        x=results[1][valid],
+        y=results[0][valid],
         mode='markers',
-        marker=dict(size=5, color=results[2],
-                    colorscale='Viridis', showscale=True)
+        marker=dict(
+            size=5,
+            color=results[2][valid],
+            colorscale='Viridis',
+            showscale=True
+        )
     ))
 
     ef_fig.update_layout(
@@ -133,21 +138,25 @@ if st.button("🚀 Run Full Quant Analysis"):
     st.plotly_chart(ef_fig, use_container_width=True)
 
     # ---------------------------------------------------
-    # RISK METRICS
+    # SINGLE STOCK ANALYSIS
     # ---------------------------------------------------
-    stock = tickers[0]
+    stock = data.columns[0]
     close_prices = data[stock]
     daily_returns = close_prices.pct_change().dropna()
 
     VaR = np.percentile(daily_returns, 5)
-    sharpe_ratio = (daily_returns.mean()/daily_returns.std()) * np.sqrt(252)
+
+    sharpe_ratio = (
+        (daily_returns.mean() / daily_returns.std()) * np.sqrt(252)
+        if daily_returns.std() != 0 else 0
+    )
 
     col1, col2 = st.columns(2)
     col1.metric("Value at Risk (95%)", f"{VaR:.4f}")
     col2.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
 
     # ---------------------------------------------------
-    # MONTE CARLO
+    # MONTE CARLO SIMULATION
     # ---------------------------------------------------
     st.subheader("🎲 Monte Carlo Simulation")
 
@@ -158,9 +167,10 @@ if st.button("🚀 Run Full Quant Analysis"):
     simulations = monte_carlo_simulation(S0, mu, sigma)
 
     mc_fig = go.Figure()
+
     for i in range(min(50, simulations.shape[1])):
         mc_fig.add_trace(go.Scatter(
-            y=simulations[:,i],
+            y=simulations[:, i],
             mode='lines',
             line=dict(width=1),
             showlegend=False
@@ -187,7 +197,7 @@ if st.button("🚀 Run Full Quant Analysis"):
         st.metric("Next Day Predicted Price", f"₹{prediction[0][0]:.2f}")
 
     except:
-        st.warning("LSTM model could not run on cloud environment.")
+        st.warning("LSTM could not run in cloud environment.")
 
     # ---------------------------------------------------
     # SECTOR HEATMAP
@@ -195,7 +205,7 @@ if st.button("🚀 Run Full Quant Analysis"):
     st.subheader("🏭 Sector-wise Market Cap Heatmap")
 
     try:
-        sector_df = get_sector_data(tickers)
+        sector_df = get_sector_data(data.columns)
         if not sector_df.empty:
             fig = px.treemap(
                 sector_df,
@@ -220,10 +230,10 @@ if st.button("🚀 Run Full Quant Analysis"):
         else:
             st.warning("FII/DII data unavailable.")
     except:
-        st.warning("FII/DII API blocked on cloud.")
+        st.warning("FII/DII API blocked.")
 
     # ---------------------------------------------------
-    # OPTION CHAIN (SAFE FIX)
+    # OPTION CHAIN
     # ---------------------------------------------------
     st.subheader("📈 NIFTY Option Chain")
 
