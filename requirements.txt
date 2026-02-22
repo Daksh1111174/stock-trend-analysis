@@ -1,0 +1,7 @@
+pyspark
+yfinance
+streamlit
+matplotlib
+pandas
+numpy
+plotly
