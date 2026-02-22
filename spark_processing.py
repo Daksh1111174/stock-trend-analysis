@@ -1,48 +1,22 @@
 # spark_processing.py
+# Streamlit Cloud Compatible (No Spark)
 
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, avg, stddev, when
-from pyspark.sql.window import Window
+import pandas as pd
+import numpy as np
 
-def create_spark_session():
-    spark = SparkSession.builder \
-        .appName("StockTrendAnalysis") \
-        .getOrCreate()
-    return spark
+def process_stock_data(df):
 
-def process_stock_data(spark, pandas_df):
-    """
-    Convert Pandas DF → Spark DF
-    Add technical indicators
-    """
+    # Moving averages
+    df["MA20"] = df["Close"].rolling(window=20).mean()
+    df["MA50"] = df["Close"].rolling(window=50).mean()
 
-    spark_df = spark.createDataFrame(pandas_df)
-
-    # Window specs
-    window_20 = Window.orderBy("Date").rowsBetween(-20, 0)
-    window_50 = Window.orderBy("Date").rowsBetween(-50, 0)
-
-    # Moving Averages
-    spark_df = spark_df.withColumn("MA20", avg("Close").over(window_20))
-    spark_df = spark_df.withColumn("MA50", avg("Close").over(window_50))
-
-    # Daily Return
-    spark_df = spark_df.withColumn(
-        "Daily_Return",
-        (col("Close") - col("Open")) / col("Open")
-    )
+    # Daily return
+    df["Daily_Return"] = (df["Close"] - df["Open"]) / df["Open"]
 
     # Volatility
-    spark_df = spark_df.withColumn(
-        "Volatility",
-        stddev("Daily_Return").over(window_20)
-    )
+    df["Volatility"] = df["Daily_Return"].rolling(window=20).std()
 
-    # Trend Signal
-    spark_df = spark_df.withColumn(
-        "Trend",
-        when(col("MA20") > col("MA50"), "Bullish")
-        .otherwise("Bearish")
-    )
+    # Trend
+    df["Trend"] = np.where(df["MA20"] > df["MA50"], "Bullish", "Bearish")
 
-    return spark_df.toPandas()
+    return df
