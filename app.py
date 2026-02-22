@@ -16,6 +16,10 @@ if st.button("Analyze"):
     with st.spinner("Fetching Data..."):
         data = fetch_stock_data(ticker)
 
+    if data is None:
+        st.error("⚠️ Failed to fetch stock data. Please check ticker symbol.")
+        st.stop()
+
     with st.spinner("Processing Data..."):
         final_df = process_stock_data(data)
 
